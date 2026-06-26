@@ -287,7 +287,7 @@ class LipsyncPipeline(DiffusionPipeline):
         print(f"Restoring {len(faces)} faces...")
         for index, face in enumerate(tqdm.tqdm(faces)):
             if index in no_face_indices:
-                  continue
+                  out_frames.append(video_frames[index])
             x1, y1, x2, y2 = boxes[index]
             height = int(y2 - y1)
             width = int(x2 - x1)

@@ -1,3 +1,8 @@
+import os
+os.environ.pop('MPLBACKEND', None)
+import matplotlib
+matplotlib.use('Agg')
+
 import gradio as gr
 from pathlib import Path
 from scripts.inference import main

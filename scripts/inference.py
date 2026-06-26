@@ -77,7 +77,7 @@ def main(config, args):
         unet=unet,
         scheduler=scheduler,
     ).to("cuda")
-
+    
     # use DeepCache
     if args.enable_deepcache:
         helper = DeepCacheSDHelper(pipe=pipeline)

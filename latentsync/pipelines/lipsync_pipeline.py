@@ -417,18 +417,35 @@ class LipsyncPipeline(DiffusionPipeline):
             generator,
         )
 
-        num_inferences = math.ceil(len(whisper_chunks) / num_frames)
+        # Build window boundaries based on face movement
+        window_boundaries = [0]
+        for i in range(1, len(boxes)):
+            if self.significant_movement(boxes[i - 1], boxes[i], threshold=40):
+                window_boundaries.append(i)
+        window_boundaries.append(len(boxes))
+
+        # Build list of (start, end) windows respecting both movement and num_frames
+        windows = []
+        for w in range(len(window_boundaries) - 1):
+            seg_start = window_boundaries[w]
+            seg_end = window_boundaries[w + 1]
+            for s in range(seg_start, seg_end, num_frames):
+                windows.append((s, min(s + num_frames, seg_end)))
+
+        num_inferences = len(windows)
         for i in tqdm.tqdm(range(num_inferences), desc="Doing inference..."):
+            win_start, win_end = windows[i]
+
             if self.unet.add_audio_layer:
-                audio_embeds = torch.stack(whisper_chunks[i * num_frames : (i + 1) * num_frames])
+                audio_embeds = torch.stack(whisper_chunks[win_start:win_end])
                 audio_embeds = audio_embeds.to(device, dtype=weight_dtype)
                 if do_classifier_free_guidance:
                     null_audio_embeds = torch.zeros_like(audio_embeds)
                     audio_embeds = torch.cat([null_audio_embeds, audio_embeds])
             else:
                 audio_embeds = None
-            inference_faces = faces[i * num_frames : (i + 1) * num_frames]
-            latents = all_latents[:, :, i * num_frames : (i + 1) * num_frames]
+            inference_faces = faces[win_start:win_end]
+            latents = all_latents[:, :, win_start:win_end]
             ref_pixel_values, masked_pixel_values, masks = self.image_processor.prepare_masks_and_masked_images(
                 inference_faces, affine_transform=False
             )

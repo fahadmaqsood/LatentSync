@@ -265,14 +265,31 @@ class LipsyncPipeline(DiffusionPipeline):
         boxes = []
         affine_matrices = []
         print(f"Affine transforming {len(video_frames)} faces...")
+        
+        prev_box = None
         for frame in tqdm.tqdm(video_frames):
-            face, box, affine_matrix = self.image_processor.affine_transform(frame)
-            if face is None:
+            # reset bias on dark/fade frames
+            if np.mean(frame) < 20:
+                self.image_processor.restorer.p_bias = None
+                prev_box = None
                 faces.append(None)
                 boxes.append(None)
                 affine_matrices.append(None)
                 continue
-                
+            face, box, affine_matrix = self.image_processor.affine_transform(frame)
+
+            if face is None:
+                self.image_processor.restorer.p_bias = None
+                prev_box = None
+                faces.append(None)
+                boxes.append(None)
+                affine_matrices.append(None)
+                continue
+
+            if self.significant_movement(prev_box, box, threshold=40):
+                self.image_processor.restorer.p_bias = None
+            
+            prev_box = box
             faces.append(face)
             boxes.append(box)
             affine_matrices.append(affine_matrix)
@@ -290,17 +307,10 @@ class LipsyncPipeline(DiffusionPipeline):
         return faces, boxes, affine_matrices, no_face_indices
 
     def restore_video(self, faces: torch.Tensor, video_frames: np.ndarray, boxes: list, affine_matrices: list, no_face_indices: set = None):
-        if no_face_indices is None:
-              no_face_indices = set()
-
         video_frames = video_frames[: len(faces)]
         out_frames = []
         print(f"Restoring {len(faces)} faces...")
         for index, face in enumerate(tqdm.tqdm(faces)):
-            if index in no_face_indices:
-                  out_frames.append(video_frames[index])
-                  continue
-
             x1, y1, x2, y2 = boxes[index]
             height = int(y2 - y1)
             width = int(x2 - x1)
@@ -435,8 +445,20 @@ class LipsyncPipeline(DiffusionPipeline):
         num_inferences = len(windows)
         for i in tqdm.tqdm(range(num_inferences), desc="Doing inference..."):
             win_start, win_end = windows[i]
-            self.image_processor.restorer.p_bias = None  # reset smoothing bias at each window
+            self.image_processor.restorer.p_bias = None
 
+            win_indices = list(range(win_start, win_end))
+            all_no_face = all(idx in no_face_indices for idx in win_indices)
+
+            if all_no_face:
+                # convert original frames to tensor format matching synced_video_frames
+                orig = torch.from_numpy(
+                    video_frames[win_start:win_end]
+                ).to(weight_dtype).to(device)
+                orig = rearrange(orig, "f h w c -> f c h w").float() / 255.0
+                orig = orig * 2 - 1
+                synced_video_frames.append(orig)
+                continue
 
             if self.unet.add_audio_layer:
                 audio_embeds = torch.stack(whisper_chunks[win_start:win_end])
@@ -517,7 +539,19 @@ class LipsyncPipeline(DiffusionPipeline):
             )
             synced_video_frames.append(decoded_latents)
 
-        synced_video_frames = self.restore_video(torch.cat(synced_video_frames), video_frames, boxes, affine_matrices, no_face_indices)
+        synced_video_frames_tensor = torch.cat(synced_video_frames)
+        restored = self.restore_video(synced_video_frames_tensor, video_frames, boxes, affine_matrices, no_face_indices)
+        
+        # overwrite no-face frames with original video frames
+        final_frames = []
+        orig_idx = 0  # index into restored (which only has face frames)
+        for i in range(len(video_frames)):
+            if i in no_face_indices:
+                final_frames.append(video_frames[i])
+            else:
+                final_frames.append(restored[orig_idx])
+                orig_idx += 1
+        synced_video_frames = np.stack(final_frames, axis=0)
 
         audio_samples_remain_length = int(synced_video_frames.shape[0] / video_fps * audio_sample_rate)
         audio_samples = audio_samples[:audio_samples_remain_length].cpu().numpy()

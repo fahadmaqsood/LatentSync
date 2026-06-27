@@ -249,6 +249,17 @@ class LipsyncPipeline(DiffusionPipeline):
         images = images.cpu().numpy()
         return images
 
+
+    @staticmethod
+    def significant_movement(box1, box2, threshold=40):
+        if box1 is None or box2 is None:
+            return True
+        cx1 = (box1[0] + box1[2]) / 2
+        cy1 = (box1[1] + box1[3]) / 2
+        cx2 = (box2[0] + box2[2]) / 2
+        cy2 = (box2[1] + box2[3]) / 2
+        return abs(cx1 - cx2) > threshold or abs(cy1 - cy2) > threshold
+
     def affine_transform_video(self, video_frames: np.ndarray):
         faces = []
         boxes = []
@@ -288,6 +299,8 @@ class LipsyncPipeline(DiffusionPipeline):
         for index, face in enumerate(tqdm.tqdm(faces)):
             if index in no_face_indices:
                   out_frames.append(video_frames[index])
+                  continue
+
             x1, y1, x2, y2 = boxes[index]
             height = int(y2 - y1)
             width = int(x2 - x1)

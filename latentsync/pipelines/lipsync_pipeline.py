@@ -407,15 +407,15 @@ class LipsyncPipeline(DiffusionPipeline):
         num_channels_latents = self.vae.config.latent_channels
 
         # Prepare latent variables
-        all_latents = self.prepare_latents(
-            len(whisper_chunks),
-            num_channels_latents,
-            height,
-            width,
-            weight_dtype,
-            device,
-            generator,
-        )
+        # all_latents = self.prepare_latents(
+        #     len(whisper_chunks),
+        #     num_channels_latents,
+        #     height,
+        #     width,
+        #     weight_dtype,
+        #     device,
+        #     generator,
+        # )
 
         # Build window boundaries based on face movement
         window_boundaries = [0]
@@ -435,6 +435,8 @@ class LipsyncPipeline(DiffusionPipeline):
         num_inferences = len(windows)
         for i in tqdm.tqdm(range(num_inferences), desc="Doing inference..."):
             win_start, win_end = windows[i]
+            self.image_processor.restorer.p_bias = None  # reset smoothing bias at each window
+
 
             if self.unet.add_audio_layer:
                 audio_embeds = torch.stack(whisper_chunks[win_start:win_end])
@@ -445,7 +447,15 @@ class LipsyncPipeline(DiffusionPipeline):
             else:
                 audio_embeds = None
             inference_faces = faces[win_start:win_end]
-            latents = all_latents[:, :, win_start:win_end]
+            latents = self.prepare_latents(
+                win_end - win_start,
+                num_channels_latents,
+                height,
+                width,
+                weight_dtype,
+                device,
+                generator,
+            )
             ref_pixel_values, masked_pixel_values, masks = self.image_processor.prepare_masks_and_masked_images(
                 inference_faces, affine_transform=False
             )

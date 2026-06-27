@@ -64,7 +64,7 @@ class ImageProcessor:
 
         landmarks3 = np.round([pt_left_eye, pt_right_eye, pt_nose])
 
-        face, affine_matrix = self.restorer.align_warp_face(image.copy(), landmarks3=landmarks3, smooth=True)
+        face, affine_matrix = self.restorer.align_warp_face(image.copy(), landmarks3=landmarks3, smooth=False)
         box = [0, 0, face.shape[1], face.shape[0]]  # x1, y1, x2, y2
         face = cv2.resize(face, (self.resolution, self.resolution), interpolation=cv2.INTER_LANCZOS4)
         face = rearrange(torch.from_numpy(face), "h w c -> c h w")
